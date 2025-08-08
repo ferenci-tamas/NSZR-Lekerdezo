@@ -70,13 +70,13 @@ NameTable <- data.table(
                "HYPERTONIA", "STROKE", "DIABETES", "PERIFERIALIS_ERBETEGSEG", "HYPERLIPIDAEMIA",
                "ESEMENY_SZINTU_PCI", "MORT30DAY", "MORT1YEAR", "DATEFORMATTED", "MEGYE", "NEM",
                "AGE", "KORHAZI_DIAGNOZIS",
-               "name", "valueformatted"),
-  name = c("Heveny szívinfarktus", "STEMI", "NSTEMI", "Kórelőzményben szereplő infarktus",
-           "Szívelégtelenség", "Krónikus obstruktív tüdőbetegség", "Magasvérnyomás-betegség",
-           "Kórelőzményben szereplő stroke", "Cukorbetegség", "Perifériás érbetegség",
-           "Magas vérzsír-szint", "Katéteres érmegnyitás (PCI)", "30 napos halálozás",
-           "1 éves halálozás", "Időszak", "Megye", "Nem", "Életkor", "STEMI/NSTEMI",
-           "name", "valueformatted"),
+               "varname", "valueformatted"),
+  varname = c("Heveny szívinfarktus", "STEMI", "NSTEMI", "Kórelőzményben szereplő infarktus",
+              "Szívelégtelenség", "Krónikus obstruktív tüdőbetegség", "Magasvérnyomás-betegség",
+              "Kórelőzményben szereplő stroke", "Cukorbetegség", "Perifériás érbetegség",
+              "Magas vérzsír-szint", "Katéteres érmegnyitás (PCI)", "30 napos halálozás",
+              "1 éves halálozás", "Időszak", "Megye", "Nem", "Életkor", "STEMI/NSTEMI",
+              "varname", "valueformatted"),
   type = c("incidence", "incidence", "incidence", "anamnestic", "anamnestic", "anamnestic",
            "comorb", "anamnestic", "comorb", "comorb", "comorb", "treatment", "survival",
            "survival", "header", "header", "header", "header", "header",
@@ -235,7 +235,7 @@ ownpanel <- function(id, metrics, primary, primarylabel, primaryvalues,
             lapply(1:nrow(NameTable[type%in%c("comorb", "anamnestic")]), function(i) {
               fluidRow(
                 column(width = 5, checkboxInput(paste0(id, "Space", NameTable[type%in%c("comorb", "anamnestic")]$variable[i], "SelEnable"),
-                                                paste0(NameTable[type%in%c("comorb", "anamnestic")]$name[i], " szerint"))),
+                                                paste0(NameTable[type%in%c("comorb", "anamnestic")]$varname[i], " szerint"))),
                 column(width = 7, conditionalPanel(paste0("input.", id, "Space", NameTable[type%in%c("comorb", "anamnestic")]$variable[i], "SelEnable == 1"),
                                                    selectInput(paste0(id, "Space", NameTable[type%in%c("comorb", "anamnestic")]$variable[i], "Sel"), NULL,
                                                                c("Igen", "Nem")))))
@@ -291,8 +291,8 @@ ui <- navbarPage(
     sidebarLayout(
       sidebarPanel(
         ownpanel("comorb", c("Nyers arány" = "crude"), "Comorb", "Kórelőzmény, társbetegség",
-                 list(`Kórelőzményben szereplő betegség` = setNames(NameTable[type == "anamnestic"]$variable, NameTable[type == "anamnestic"]$name),
-                      `Társbetegség` = setNames(NameTable[type == "comorb"]$variable, NameTable[type == "comorb"]$name)),
+                 list(`Kórelőzményben szereplő betegség` = setNames(NameTable[type == "anamnestic"]$variable, NameTable[type == "anamnestic"]$varname),
+                      `Társbetegség` = setNames(NameTable[type == "comorb"]$variable, NameTable[type == "comorb"]$varname)),
                  c("Nincs" = "None", "STEMI/NSTEMI" = "KORHAZI_DIAGNOZIS",
                    "Nem" = "NEM", "Életkor" = "AGE", "Megye" = "MEGYE"),
                  FALSE, FALSE, FALSE)
@@ -319,7 +319,7 @@ ui <- navbarPage(
                  c("Katéteres érmegnyitás (PCI)" = "ESEMENY_SZINTU_PCI"),
                  c("Nincs" = "None", "STEMI/NSTEMI" = "KORHAZI_DIAGNOZIS",
                    "Nem" = "NEM", "Életkor" = "AGE", "Megye" = "MEGYE",
-                   setNames(NameTable[type %in%c("anamnestic", "comorb")]$variable, NameTable[type %in%c("anamnestic", "comorb")]$name)),
+                   setNames(NameTable[type %in%c("anamnestic", "comorb")]$variable, NameTable[type %in%c("anamnestic", "comorb")]$varname)),
                  TRUE, FALSE, FALSE)
       ),
       
@@ -345,7 +345,7 @@ ui <- navbarPage(
                  c("Nincs" = "None", "STEMI/NSTEMI" = "KORHAZI_DIAGNOZIS",
                    "Nem" = "NEM", "Életkor" = "AGE",
                    "Katéteres érmegnyitás (PCI)" = "ESEMENY_SZINTU_PCI", "Megye" = "MEGYE",
-                   setNames(NameTable[type %in%c("anamnestic", "comorb")]$variable, NameTable[type %in%c("anamnestic", "comorb")]$name)),
+                   setNames(NameTable[type %in%c("anamnestic", "comorb")]$variable, NameTable[type %in%c("anamnestic", "comorb")]$varname)),
                  TRUE, TRUE, FALSE)
       ),
       
@@ -533,8 +533,8 @@ server <- function(input, output) {
                                    "agesexcomorbadj" = " (életkorra, nemre és társbetegségekre korrigált arány)"),
                             "</b>",
                             if(length(primary) == 1 && strat != "None")
-                              paste0("<br>", NameTable[variable == primary]$name) else ""),
-         spaceTitle = paste0("<b>", NameTable[variable %in% primary]$name, " ", spaceTitletext,
+                              paste0("<br>", NameTable[variable == primary]$varname) else ""),
+         spaceTitle = paste0("<b>", NameTable[variable %in% primary]$varname, " ", spaceTitletext,
                              switch(metric,
                                     "absolute" = " (esetszám)",
                                     "cruderate" = " (nyers ráta)",
@@ -551,21 +551,21 @@ server <- function(input, output) {
                              if(!is.null(dgSel)) paste0(" Diagnózis: ", dgSel),
                              if(!is.null(pciSel)) paste0(" Katéteres érmegnyitás: ", pciSel),
                              if(!is.null(comorbSel)) do.call(paste0, lapply(1:nrow(NameTable[type %in% c("comorb", "anamnestic")]), function(i)
-                               if(!is.na(comorbSel[i])) paste0(" ", NameTable[type %in% c("comorb", "anamnestic")]$name[i], ": ", comorbSel[i]))))
+                               if(!is.na(comorbSel[i])) paste0(" ", NameTable[type %in% c("comorb", "anamnestic")]$varname[i], ": ", comorbSel[i]))))
     )
   }
   
   owntab <- function(dat, nametext, valuetext, titletext) {
     dat <- merge(dat, NameTable, by = "variable")
     dat <- dat[, colnames(dat) %in% NameTable$variable, with = FALSE]
-    setcolorder(dat, c("name", if("DATEFORMATTED" %in% colnames(dat)) "DATEFORMATTED",
+    setcolorder(dat, c("varname", if("DATEFORMATTED" %in% colnames(dat)) "DATEFORMATTED",
                        if("MEGYE" %in% colnames(dat)) "MEGYE",
                        setdiff(colnames(dat),
-                               c("name", "DATEFORMATTED", "MEGYE", "valueformatted")),
+                               c("varname", "DATEFORMATTED", "MEGYE", "valueformatted")),
                        "valueformatted"))
     dat <- na.omit(dat)
-    colnames(dat) <- NameTable$name[match(colnames(dat), NameTable$variable)]
-    colnames(dat)[colnames(dat) == "name"] <- nametext
+    colnames(dat) <- NameTable$varname[match(colnames(dat), NameTable$variable)]
+    colnames(dat)[colnames(dat) == "varname"] <- nametext
     colnames(dat)[colnames(dat) == "valueformatted"] <- valuetext
     
     DT::datatable(
@@ -722,7 +722,7 @@ server <- function(input, output) {
     dat <- merge(di$data, NameTable[type == "incidence"], by = "variable")
     strat <- if(input$incidenceMetric != "adjrate") input$incidenceTimeStrat else input$incidenceTimeStratStd
     dat$strat <- if(input$incidenceType == "time" && length(input$incidenceTimeIncidence) == 1 &&
-                    strat != "None") dat[[strat]] else dat$name
+                    strat != "None") dat[[strat]] else dat$varname
     
     ownplot(dat, input$incidenceType, input$incidenceTimeIncludeZero, input$incidenceTimeCI && input$incidenceMetric != "absolute",
             di$timeTitle,
@@ -769,7 +769,7 @@ server <- function(input, output) {
     di <- dataInputComorb()
     dat <- merge(di$data, NameTable[type %in%c("anamnestic", "comorb")], by = "variable")
     dat$strat <- if(input$comorbType == "time" && length(input$comorbTimeComorb) == 1 &&
-                    input$comorbTimeStrat != "None") dat[[input$comorbTimeStrat]] else dat$name
+                    input$comorbTimeStrat != "None") dat[[input$comorbTimeStrat]] else dat$varname
     
     ownplot(dat, input$comorbType, input$comorbTimeIncludeZero, input$comorbTimeCI,
             di$timeTitle,
@@ -814,7 +814,7 @@ server <- function(input, output) {
     dat <- merge(di$data, NameTable[type == "treatment"], by = "variable")
     dat$strat <- if(input$treatmentType == "time" && length(input$treatmentTimeTreatment) == 1 &&
                     input$treatmentTimeStrat != "None" &&
-                    !input$treatmentMetric %in% c("agesexadj", "agesexcomorbadj")) dat[[input$treatmentTimeStrat]] else dat$name
+                    !input$treatmentMetric %in% c("agesexadj", "agesexcomorbadj")) dat[[input$treatmentTimeStrat]] else dat$varname
     
     ownplot(
       dat, input$treatmentType, input$treatmentTimeIncludeZero, input$treatmentTimeCI,
@@ -863,7 +863,7 @@ server <- function(input, output) {
     dat <- merge(di$data, NameTable[type == "survival"], by = "variable")
     dat$strat <- if(input$survivalType == "time" && length(input$survivalTimeSurvival) == 1 &&
                     input$survivalTimeStrat != "None" &&
-                    !input$survivalMetric %in% c("agesexadj", "agesexcomorbadj")) dat[[input$survivalTimeStrat]] else dat$name
+                    !input$survivalMetric %in% c("agesexadj", "agesexcomorbadj")) dat[[input$survivalTimeStrat]] else dat$varname
     
     ownplot(
       dat, input$survivalType, input$survivalTimeIncludeZero, input$survivalTimeCI,
