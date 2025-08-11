@@ -162,12 +162,16 @@ ownpanel <- function(id, metrics, primary, primarylabel, primaryvalues,
         conditionalPanel(paste0("(input.", id, "Time", primary, ".length == 1 & input.", id, "Metric != 'adjrate' & input.", id, "Metric != 'agesexadj' & input.", id, "Metric != 'agesexcomorbadj')"),
                          selectInput(paste0(id, "TimeStrat"), "Lebontás", timestrat)),
         conditionalPanel(paste0("(input.", id, "Time", primary, ".length == 1 & input.", id, "Metric == 'adjrate')"),
-                         selectInput(paste0(id, "TimeStratStd"), "Lebontás", timestrat[timestrat != "AGE"])),
+                         selectInput(paste0(id, "TimeStratAdjrate"), "Lebontás", timestrat[timestrat != "AGE"])),
+        conditionalPanel(paste0("(input.", id, "Time", primary, ".length == 1 & input.", id, "Metric == 'agesexadj')"),
+                         selectInput(paste0(id, "TimeStratAgesexadj"), "Lebontás", timestrat[!timestrat %in% c("AGE", "NEM")])),
+        conditionalPanel(paste0("(input.", id, "Time", primary, ".length == 1 & input.", id, "Metric == 'agesexcomorbadj')"),
+                         selectInput(paste0(id, "TimeStratAgesexcomorbadj"), "Lebontás", timestrat[!timestrat %in% c("AGE", "NEM", NameTable[type %in% c("comorb", "anamnestic")]$variable)])),
         conditionalPanel(
           paste0("(input.", id, "Time", primary, ".length == 1 & input.", id, "Metric != 'adjrate' & ",
                  "input.", id, "Metric != 'agesexadj' & input.", id, "Metric != 'agesexcomorbadj' & ",
                  "(input.", id, "TimeStrat == 'AGE' | input.", id, "TimeStrat == 'MEGYE')) | ",
-                 "(input.", id, "Time", primary, ".length == 1 & input.", id, "Metric == 'adjrate' & input.", id, "TimeStratStd == 'MEGYE')"),
+                 "(input.", id, "Time", primary, ".length == 1 & input.", id, "Metric == 'adjrate' & input.", id, "TimeStratAdjrate == 'MEGYE')"),
           actionButton(paste0(id, "ShowButton"), "Minden görbe megjelenítése"),
           actionButton(paste0(id, "HideButton"), "Minden görbe elrejtése")),
         selectInput(paste0(id, "TimeFreq"), "Időbeli sűrűség",
@@ -442,10 +446,12 @@ server <- function(input, output) {
     
     dat$DATE <- switch(freq, "year" = dat$YEAR, "month" = dat$YEARMON)
     
+    stratvar <- c(stratvar0, if(length(primary) == 1 && strat != "None") strat)
+    
     dat <- rbindlist(lapply(primary, function(prim) {
       if(metric == "crude") {
         temp <- cbind(dat[!is.na(get(prim)), quickbinomtest(sum(get(prim) == "Igen"), .N),
-                          c(stratvar0, if(length(primary) == 1 && strat != "None") strat)])[order(get(stratvar0))]
+                          stratvar])[order(get(stratvar0))]
         if(stratvar0 == "MEGYE")
           temp <- merge(CJ(MEGYE = unique(RawData$MEGYE)), temp, by = "MEGYE", all.x = TRUE)
         temp$variable <- prim
@@ -455,20 +461,18 @@ server <- function(input, output) {
         as.data.table(emmeans::emmeans(
           glm(as.formula(switch(
             metric,
-            "agesexadj" = paste0(prim, " == 'Igen' ~ as.factor(", stratvar0, ") + NEM + AGEcont"),
-            "agesexcomorbadj" = paste0(prim, " == 'Igen' ~ as.factor(", stratvar0, ") + NEM + ",
+            "agesexadj" = paste0(prim, " == 'Igen' ~ as.factor(", paste0(stratvar, collapse = ") + as.factor("), ") + NEM + AGEcont"),
+            "agesexcomorbadj" = paste0(prim, " == 'Igen' ~ as.factor(", paste0(stratvar, collapse = ") + as.factor("), ") + NEM + ",
                                        "AGEcont + MYOCARDIALIS + SZIVELEGTELENSEG + ",
                                        "HYPERTONIA + STROKE + DIABETES"))),
             data = dat, family = binomial(link = "logit")),
-          stratvar0, type = "response", weights = "proportional"))[
+          stratvar, type = "response", weights = "proportional", rg.limit = 15000))[
             , c(.SD, .(value = if(nrow(dat) < 50) NA_real_ else response * 100,
                        lci = if(nrow(dat) < 50) NA_real_ else asymp.LCL * 100,
                        uci = if(nrow(dat) < 50) NA_real_ else asymp.UCL * 100, variable = prim))]
       } else {
         temp <- dat
         if(prim != "AMI") temp <- temp[KORHAZI_DIAGNOZIS == prim]
-        
-        stratvar <- c(stratvar0, if(length(primary) == 1 && strat != "None") strat)
         
         temp <- merge(CJ(AGE = if(is.null(ageSel)) AgeTable$AGE else ageSel,
                          DATE = unique(switch(freq,
@@ -699,7 +703,7 @@ server <- function(input, output) {
   
   dataInputTimeIncidence <- reactive(dataInput(
     input$incidenceMetric, input$incidenceTimeIncidence,
-    if(input$incidenceMetric != "adjrate") input$incidenceTimeStrat else input$incidenceTimeStratStd, "DATE",
+    if(input$incidenceMetric != "adjrate") input$incidenceTimeStrat else input$incidenceTimeStratAdjrate, "DATE",
     input$incidenceTimeFreq, input$incidenceTimeCI,
     c(-Inf, lubridate::year(datadate) - 1), NULL, NULL, NULL, NULL, NULL, "", "A betegség incidenciája", ""))
   dataInputSpaceIncidence <- reactive(dataInput(
@@ -720,7 +724,7 @@ server <- function(input, output) {
     
     di <- dataInputIncidence()
     dat <- merge(di$data, NameTable[type == "incidence"], by = "variable")
-    strat <- if(input$incidenceMetric != "adjrate") input$incidenceTimeStrat else input$incidenceTimeStratStd
+    strat <- if(input$incidenceMetric != "adjrate") input$incidenceTimeStrat else input$incidenceTimeStratAdjrate
     dat$strat <- if(input$incidenceType == "time" && length(input$incidenceTimeIncidence) == 1 &&
                     strat != "None") dat[[strat]] else dat$varname
     
@@ -790,7 +794,11 @@ server <- function(input, output) {
     })
   
   dataInputTimeTreatment <- reactive(dataInput(
-    input$treatmentMetric, input$treatmentTimeTreatment, input$treatmentTimeStrat, "DATE",
+    input$treatmentMetric, input$treatmentTimeTreatment,
+    switch(input$treatmentMetric,
+           "crude" = input$treatmentTimeStrat,
+           "agesexadj" = input$treatmentTimeStratAgesexadj,
+           "agesexcomorbadj" = input$treatmentTimeStratAgesexcomorbadj), "DATE",
     input$treatmentTimeFreq, input$treatmentTimeCI, NULL, NULL, NULL, NULL, NULL, NULL, "%",
     "Adott ellátásban részesülők aránya", ""))
   dataInputSpaceTreatment <- reactive(dataInput(
@@ -812,9 +820,12 @@ server <- function(input, output) {
     
     di <- dataInputTreatment()
     dat <- merge(di$data, NameTable[type == "treatment"], by = "variable")
+    strat <- switch(input$treatmentMetric,
+                    "crude" = input$treatmentTimeStrat,
+                    "agesexadj" = input$treatmentTimeStratAgesexadj,
+                    "agesexcomorbadj" = input$treatmentTimeStratAgesexcomorbadj)
     dat$strat <- if(input$treatmentType == "time" && length(input$treatmentTimeTreatment) == 1 &&
-                    input$treatmentTimeStrat != "None" &&
-                    !input$treatmentMetric %in% c("agesexadj", "agesexcomorbadj")) dat[[input$treatmentTimeStrat]] else dat$varname
+                    strat != "None") dat[[strat]] else dat$varname
     
     ownplot(
       dat, input$treatmentType, input$treatmentTimeIncludeZero, input$treatmentTimeCI,
@@ -839,7 +850,11 @@ server <- function(input, output) {
     })
   
   dataInputTimeSurvival <- reactive(dataInput(
-    input$survivalMetric, input$survivalTimeSurvival, input$survivalTimeStrat, "DATE",
+    input$survivalMetric, input$survivalTimeSurvival,
+    switch(input$survivalMetric,
+           "crude" = input$survivalTimeStrat,
+           "agesexadj" = input$survivalTimeStratAgesexadj,
+           "agesexcomorbadj" = input$survivalTimeStratAgesexcomorbadj), "DATE",
     input$survivalTimeFreq, input$survivalTimeCI, NULL, NULL, NULL, NULL, NULL, NULL, "%",
     "Halálozási arány", ""))
   dataInputSpaceSurvival <- reactive(dataInput(
@@ -861,9 +876,12 @@ server <- function(input, output) {
     
     di <- dataInputSurvival()
     dat <- merge(di$data, NameTable[type == "survival"], by = "variable")
+    strat <- switch(input$survivalMetric,
+                    "crude" = input$survivalTimeStrat,
+                    "agesexadj" = input$survivalTimeStratAgesexadj,
+                    "agesexcomorbadj" = input$survivalTimeStratAgesexcomorbadj)
     dat$strat <- if(input$survivalType == "time" && length(input$survivalTimeSurvival) == 1 &&
-                    input$survivalTimeStrat != "None" &&
-                    !input$survivalMetric %in% c("agesexadj", "agesexcomorbadj")) dat[[input$survivalTimeStrat]] else dat$varname
+                    strat != "None") dat[[strat]] else dat$varname
     
     ownplot(
       dat, input$survivalType, input$survivalTimeIncludeZero, input$survivalTimeCI,
