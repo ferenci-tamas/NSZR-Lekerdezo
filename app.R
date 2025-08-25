@@ -92,6 +92,19 @@ datadate <- RawData$datadate
 deathcutoffdate <- RawData$deathcutoffdate
 RawData <- RawData$RawData
 
+modalcat <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+predgrid <- data.table(NEM = modalcat(RawData$NEM),
+                       AGEcont = median(RawData$AGEcont),
+                       MYOCARDIALIS = modalcat(RawData$MYOCARDIALIS),
+                       SZIVELEGTELENSEG = modalcat(RawData$SZIVELEGTELENSEG),
+                       HYPERTONIA = modalcat(RawData$HYPERTONIA),
+                       STROKE = modalcat(RawData$STROKE),
+                       DIABETES = modalcat(RawData$DIABETES))
+
 PopData <- readRDS("PopData.rds")
 
 ESP2013 <- data.table(
@@ -150,6 +163,11 @@ ownpanel <- function(id, metrics, primary, primarylabel, primaryvalues,
       radioButtons(paste0(id, "Subject"), "Vizsgálat tárgya",
                    c("Időbeli alakulás" = "time", "Területi alakulás" = "space")),
       selectInput(paste0(id, "Metric"), "Mutató", metrics),
+      conditionalPanel(paste0("['agesexadj', 'agesexcomorbadj'].includes(input.", id, "Metric)"),
+                       radioButtons(paste0(id, "MetricDisplay"), div("Megjelenítés", bslib::tooltip(
+                         bsicons::bs_icon("question-circle"),
+                         paste0("A predikált arány választása esetén a kontrollváltozók közepes (folytonosaknál medián, kategoriálisoknál módusz) értéke mellett történik a predikció."),
+                         placement = "right")), c("Esélyhányados (OR)" = "OR", "Predikált arány" = "pred"))),
       conditionalPanel(
         paste0("input.", id, "Subject == 'time'"), 
         shinyWidgets::pickerInput(
@@ -471,7 +489,7 @@ server <- function(input, output) {
   
   dataInput <- function(metric, primary, subject, strat, freq, ci,
                         yearSel, sexSel, dgSel, ageSel, comorbSel, pciSel, countySel,
-                        uom, titleText) {
+                        uom, titleText, metricDisplay) {
     dat <- RawData
     
     if(!is.null(yearSel)) dat <- dat[lubridate::year(DATE) >= yearSel[1] & 
@@ -487,6 +505,8 @@ server <- function(input, output) {
     
     dat$DATE <- switch(freq, "year" = dat$YEAR, "month" = dat$YEARMON)
     
+    dat$MEGYE <- relevel(as.factor(dat$MEGYE), ref = "Budapest")
+    
     if(strat == "None") strat <- NULL
     stratvar <- c(subject, strat)
     
@@ -494,24 +514,23 @@ server <- function(input, output) {
       if(metric == "crude") {
         temp <- cbind(dat[!is.na(get(prim)), quickbinomtest(sum(get(prim) == "Igen"), .N),
                           stratvar])[order(get(subject))]
-        if(subject == "MEGYE")
-          temp <- merge(CJ(MEGYE = unique(RawData$MEGYE)), temp, by = "MEGYE", all.x = TRUE)
-        temp$variable <- prim
-        # if(length(primary) == 1 && strat != "None") temp <- temp[order(get(strat))]
-        temp
+        if(subject == "MEGYE") temp <- merge(CJ(MEGYE = unique(RawData$MEGYE)), temp, by = "MEGYE", all.x = TRUE)
       } else if(metric %in% c("agesexadj", "agesexcomorbadj")) {
-        as.data.table(emmeans::emmeans(
-          glm(as.formula(switch(
+        temp <- dat[, {
+          temp <- glm(as.formula(switch(
             metric,
-            "agesexadj" = paste0(prim, " == 'Igen' ~ as.factor(", paste0(stratvar, collapse = ") + as.factor("), ") + NEM + AGEcont"),
-            "agesexcomorbadj" = paste0(prim, " == 'Igen' ~ as.factor(", paste0(stratvar, collapse = ") + as.factor("), ") + NEM + ",
+            "agesexadj" = paste0(prim, " == 'Igen' ~ as.factor(", subject, ") + NEM + AGEcont"),
+            "agesexcomorbadj" = paste0(prim, " == 'Igen' ~ as.factor(", subject, ") + NEM + ",
                                        "AGEcont + MYOCARDIALIS + SZIVELEGTELENSEG + ",
                                        "HYPERTONIA + STROKE + DIABETES"))),
-            data = dat, family = binomial(link = "logit")),
-          stratvar, type = "response", weights = "proportional", rg.limit = 15000))[
-            , c(.SD, .(value = if(nrow(dat) < 50) NA_real_ else response * 100,
-                       lci = if(nrow(dat) < 50) NA_real_ else asymp.LCL * 100,
-                       uci = if(nrow(dat) < 50) NA_real_ else asymp.UCL * 100, variable = prim))]
+            data = .SD, family = binomial(link = "logit"))
+          xlevs <- temp$xlevels[[grep(subject, names(temp$xlevels))]]
+          if(subject == "DATE") xlevs <- as.Date(xlevs)
+          temp <- if(metricDisplay == "OR") rbind(data.table(1, `2.5 %` = 1, `97.5 %` = 1), data.table(exp(coef(temp)), exp(confint.default(temp)))[grepl(subject, names(coef(temp))),]) else
+            with(predict(temp, cbind(setNames(data.table(xlevs), subject), predgrid), type = "link", se.fit = TRUE),
+                 data.table(plogis(fit) * 100, plogis(fit - qnorm(0.975) * se.fit) * 100, plogis(fit + qnorm(0.975) * se.fit) * 100))
+          setNames(cbind(xlevs, temp), c(subject, "value", "lci", "uci"))
+        }, strat]
       } else {
         temp <- dat
         if(prim != "AMI") temp <- temp[KORHAZI_DIAGNOZIS == prim]
@@ -545,11 +564,9 @@ server <- function(input, output) {
                            with(as.list(epitools::ageadjust.direct(N, POP, stdpop = STDPOP)),
                                 list(value = adj.rate * 1e5, lci = lci * 1e5, uci = uci * 1e5)),
                          stratvar])
-        
-        temp$variable <- prim
-        
-        temp
       }
+      temp$variable <- prim
+      temp
     }))
     
     if(subject == "DATE") {
@@ -588,8 +605,7 @@ server <- function(input, output) {
                         if(!is.null(dgSel)) paste0(" Diagnózis: ", dgSel),
                         if(!is.null(pciSel)) paste0(" Katéteres érmegnyitás: ", pciSel),
                         if(!is.null(comorbSel)) do.call(paste0, lapply(1:nrow(NameTable[type %in% c("comorb", "anamnestic")]), function(i)
-                          if(!is.na(comorbSel[i])) paste0(" ", NameTable[type %in% c("comorb", "anamnestic")]$varname[i], ": ", comorbSel[i]))))
-    )
+                          if(!is.na(comorbSel[i])) paste0(" ", NameTable[type %in% c("comorb", "anamnestic")]$varname[i], ": ", comorbSel[i])))))
   }
   
   owntab <- function(dat, nametext, valuetext, titletext) {
@@ -754,7 +770,8 @@ server <- function(input, output) {
     pciSel = NULL,
     countySel = if(input$incidenceTimeSelEnable && input$incidenceTimeCountySelEnable) input$incidenceTimeCountySel else NULL,
     uom = "",
-    titleText = "betegség incidenciája"))
+    titleText = "betegség incidenciája",
+    metricDisplay = NULL))
   dataInputSpaceIncidence <- reactive(dataInput(
     metric = input$incidenceMetric,
     primary = input$incidenceSpaceIncidence,
@@ -770,7 +787,8 @@ server <- function(input, output) {
     pciSel = NULL,
     countySel = NULL,
     uom = "",
-    titleText = "betegség incidenciája"))
+    titleText = "betegség incidenciája",
+    metricDisplay = NULL))
   
   dataInputIncidence <- reactive(switch(input$incidenceSubject,
                                         "time" = dataInputTimeIncidence(),
@@ -785,15 +803,24 @@ server <- function(input, output) {
     dat$strat <- if(input$incidenceSubject == "time" && length(input$incidenceTimeIncidence) == 1 &&
                     strat != "None") dat[[strat]] else dat$varname
     
-    ownplot(dat, input$incidenceSubject, input$incidenceTimeIncludeZero, input$incidenceTimeCI && input$incidenceMetric != "absolute",
-            input$incidenceTimeFreq, input$incidenceSpacePlotType,
-            input$incidenceSpacePlotBarOrder, input$incidenceSpacePlotBarHorizontal,
-            input$incidenceSpaceCI && input$incidenceMetric != "absolute",
-            switch(input$incidenceMetric, "absolute" = "Esetszám", "cruderate" = "Nyers ráta [/100 ezer fő/év]", "adjrate" = "Standardizált ráta [/100 ezer fő/év]"),
-            switch(input$incidenceMetric, "absolute" = "", "cruderate" = "/100 ezer fő/év", "adjrate" = "/100 ezer fő/év"),
-            if(input$incidenceMetric == "absolute") 0 else 1,
-            switch(input$incidenceSubject, "time" = input$incidenceTimeDisplayallvalues, "space" = input$incidenceSpaceDisplayallvalues),
-            input$incidenceSpaceFixedcoloraxis, input$incidenceSpaceFixedcoloraxisMin, input$incidenceSpaceFixedcoloraxisMax, di$title)
+    ownplot(
+      dat = dat,
+      type = input$incidenceSubject,
+      timeIncludeZero = input$incidenceTimeIncludeZero,
+      timeCI = input$incidenceTimeCI && input$incidenceMetric != "absolute",
+      freq = input$incidenceTimeFreq,
+      spacePlotType = input$incidenceSpacePlotType,
+      spacePlotBarOrder = input$incidenceSpacePlotBarOrder,
+      spacePlotBarHorizontal = input$incidenceSpacePlotBarHorizontal,
+      spaceCI = input$incidenceSpaceCI && input$incidenceMetric != "absolute",
+      ytitle = switch(input$incidenceMetric, "absolute" = "Esetszám", "cruderate" = "Nyers ráta [/100 ezer fő/év]", "adjrate" = "Standardizált ráta [/100 ezer fő/év]"),
+      uom = switch(input$incidenceMetric, "absolute" = "", "cruderate" = "/100 ezer fő/év", "adjrate" = "/100 ezer fő/év"),
+      dig = if(input$incidenceMetric == "absolute") 0 else 1,
+      displayallvalues = switch(input$incidenceSubject, "time" = input$incidenceTimeDisplayallvalues, "space" = input$incidenceSpaceDisplayallvalues),
+      fixedcoloraxis = input$incidenceSpaceFixedcoloraxis,
+      fixedcoloraxisMin = input$incidenceSpaceFixedcoloraxisMin,
+      fixedcoloraxisMax = input$incidenceSpaceFixedcoloraxisMax,
+      titleText = di$title)
   })
   
   output$incidenceTab <- DT::renderDT(
@@ -822,7 +849,8 @@ server <- function(input, output) {
     pciSel = NULL,
     countySel = if(input$comorbTimeSelEnable && input$comorbTimeCountySelEnable) input$comorbTimeCountySel else NULL,
     uom = "%",
-    titleText = "kórelőzmény, társbetegség aránya"))
+    titleText = "kórelőzmény, társbetegség aránya",
+    metricDisplay = NULL))
   dataInputSpaceComorb <- reactive(dataInput(
     metric = input$comorbMetric,
     primary = input$comorbSpaceComorb,
@@ -838,7 +866,8 @@ server <- function(input, output) {
     pciSel = NULL,
     countySel = NULL,
     uom = "%",
-    titleText = "kórelőzmény, társbetegség aránya"))
+    titleText = "kórelőzmény, társbetegség aránya",
+    metricDisplay = NULL))
   
   dataInputComorb <- reactive(switch(input$comorbSubject,
                                      "time" = dataInputTimeComorb(),
@@ -852,13 +881,24 @@ server <- function(input, output) {
     dat$strat <- if(input$comorbSubject == "time" && length(input$comorbTimeComorb) == 1 &&
                     input$comorbTimeStrat != "None") dat[[input$comorbTimeStrat]] else dat$varname
     
-    ownplot(dat, input$comorbSubject, input$comorbTimeIncludeZero, input$comorbTimeCI,
-            input$comorbTimeFreq, input$comorbSpacePlotType,
-            input$comorbSpacePlotBarOrder, input$comorbSpacePlotBarHorizontal,
-            input$comorbSpaceCI && input$comorbMetric != "absolute",
-            "Arány [%]", "%", 1,
-            switch(input$comorbSubject, "time" = input$comorbTimeDisplayallvalues, "space" = input$comorbSpaceDisplayallvalues),
-            input$comorbSpaceFixedcoloraxis, input$comorbSpaceFixedcoloraxisMin, input$comorbSpaceFixedcoloraxisMax, di$title)
+    ownplot(
+      dat = dat,
+      type = input$comorbSubject,
+      timeIncludeZero = input$comorbTimeIncludeZero,
+      timeCI = input$comorbTimeCI,
+      freq = input$comorbTimeFreq,
+      spacePlotType = input$comorbSpacePlotType,
+      spacePlotBarOrder = input$comorbSpacePlotBarOrder,
+      spacePlotBarHorizontal = input$comorbSpacePlotBarHorizontal,
+      spaceCI = input$comorbSpaceCI && input$comorbMetric != "absolute",
+      ytitle = "Arány [%]",
+      uom = "%",
+      dig = 1,
+      displayallvalues = switch(input$comorbSubject, "time" = input$comorbTimeDisplayallvalues, "space" = input$comorbSpaceDisplayallvalues),
+      fixedcoloraxis = input$comorbSpaceFixedcoloraxis,
+      fixedcoloraxisMin = input$comorbSpaceFixedcoloraxisMin,
+      fixedcoloraxisMax = input$comorbSpaceFixedcoloraxisMax,
+      titleText = di$title)
   })
   
   output$comorbTab <- DT::renderDT(
@@ -888,8 +928,9 @@ server <- function(input, output) {
         input[[paste0("treatmentTime", com, "Sel")]] else NA),
     pciSel = NULL,
     countySel = if(input$treatmentTimeSelEnable && input$treatmentTimeCountySelEnable) input$treatmentTimeCountySel else NULL,
-    uom = "%",
-    titleText = "ellátásban részesülők aránya"))
+    uom = if(input$treatmentMetric %in% c("agesexadj", "agesexcomorbadj") && input$treatmentMetricDisplay == "OR") "" else "%",
+    titleText = "ellátásban részesülők aránya",
+    metricDisplay = input$treatmentMetricDisplay))
   dataInputSpaceTreatment <- reactive(dataInput(
     metric = input$treatmentMetric,
     primary = input$treatmentSpaceTreatment,
@@ -905,8 +946,9 @@ server <- function(input, output) {
       if(input$treatmentSpaceSelEnable && input$treatmentMetric != "agesexcomorbadj" && input[[paste0("treatmentSpace", com, "SelEnable")]]) input[[paste0("treatmentSpace", com, "Sel")]] else NA),
     pciSel = NULL,
     countySel = NULL,
-    uom = "%",
-    titleText = "ellátásban részesülők aránya"))
+    uom = if(input$treatmentMetric %in% c("agesexadj", "agesexcomorbadj") && input$treatmentMetricDisplay == "OR") "" else "%",
+    titleText = "ellátásban részesülők aránya",
+    metricDisplay = input$treatmentMetricDisplay))
   
   dataInputTreatment <- reactive(switch(input$treatmentSubject,
                                         "time" = dataInputTimeTreatment(),
@@ -925,23 +967,36 @@ server <- function(input, output) {
                     strat != "None") dat[[strat]] else dat$varname
     
     ownplot(
-      dat, input$treatmentSubject, input$treatmentTimeIncludeZero, input$treatmentTimeCI,
-      input$treatmentTimeFreq, input$treatmentSpacePlotType,
-      input$treatmentSpacePlotBarOrder, input$treatmentSpacePlotBarHorizontal,
-      input$treatmentSpaceCI && input$treatmentMetric != "absolute",
-      "Arány [%]", "%", 1,
-      switch(input$treatmentSubject, "time" = input$treatmentTimeDisplayallvalues, "space" = input$treatmentSpaceDisplayallvalues),
-      input$treatmentSpaceFixedcoloraxis, input$treatmentSpaceFixedcoloraxisMin, input$treatmentSpaceFixedcoloraxisMax, di$title)
+      dat = dat,
+      type = input$treatmentSubject,
+      timeIncludeZero = input$treatmentTimeIncludeZero,
+      timeCI = input$treatmentTimeCI,
+      freq = input$treatmentTimeFreq,
+      spacePlotType = input$treatmentSpacePlotType,
+      spacePlotBarOrder = input$treatmentSpacePlotBarOrder,
+      spacePlotBarHorizontal = input$treatmentSpacePlotBarHorizontal,
+      spaceCI = input$treatmentSpaceCI && input$treatmentMetric != "absolute",
+      ytitle = if(input$treatmentMetric %in% c("agesexadj", "agesexcomorbadj") && input$treatmentMetricDisplay == "OR") "Esélyhányados (OR)" else "Arány [%]",
+      uom = if(input$treatmentMetric %in% c("agesexadj", "agesexcomorbadj") && input$treatmentMetricDisplay == "OR") "" else "%",
+      dig = 1,
+      displayallvalues = switch(input$treatmentSubject, "time" = input$treatmentTimeDisplayallvalues, "space" = input$treatmentSpaceDisplayallvalues),
+      fixedcoloraxis = input$treatmentSpaceFixedcoloraxis,
+      fixedcoloraxisMin = input$treatmentSpaceFixedcoloraxisMin,
+      fixedcoloraxisMax = input$treatmentSpaceFixedcoloraxisMax,
+      titleText = di$title)
   })
   
   output$treatmentTab <- DT::renderDT(
     server = FALSE,
     {
-      owntab(dataInputTreatment()$data, "Ellátás", paste0("Arány ", switch(
-        input$treatmentMetric, "crude" = "(nyers)",
-        "agesexadj" = "(életkorra és nemre korrigált)",
-        "agesexcomorbadj" = "(életkorra, nemre és társbetegségekre korrigált)", " [%]")),
-        "Adott ellátásban részesülők aránya, NSZR")
+      owntab(dataInputTreatment()$data, "Ellátás",
+             paste0(if(input$treatmentMetric %in% c("agesexadj", "agesexcomorbadj") && input$treatmentMetricDisplay == "OR") "Esélyhányados " else "Arány ",
+                    switch(
+                      input$treatmentMetric, "crude" = "(nyers)",
+                      "agesexadj" = "(életkorra és nemre korrigált)",
+                      "agesexcomorbadj" = "(életkorra, nemre és társbetegségekre korrigált)"),
+                    if(input$treatmentMetric %in% c("agesexadj", "agesexcomorbadj") && input$treatmentMetricDisplay == "OR") "" else " [%]"),
+             "Adott ellátásban részesülők aránya, NSZR")
     })
   
   dataInputTimeSurvival <- reactive(dataInput(
@@ -963,8 +1018,9 @@ server <- function(input, output) {
         input[[paste0("survivalTime", com, "Sel")]] else NA),
     pciSel = if(input$survivalTimeSelEnable && input$survivalTimePciSelEnable) input$survivalTimePciSel else NULL,
     countySel = if(input$survivalTimeSelEnable && input$survivalTimeCountySelEnable) input$survivalTimeCountySel else NULL,
-    uom = "%",
-    titleText = "kimenet aránya"))
+    uom = if(input$survivalMetric %in% c("agesexadj", "agesexcomorbadj") && input$survivalMetricDisplay == "OR") "" else "%",
+    titleText = "kimenet aránya",
+    metricDisplay = input$survivalMetricDisplay))
   dataInputSpaceSurvival <- reactive(dataInput(
     metric = input$survivalMetric,
     primary = input$survivalSpaceSurvival,
@@ -980,8 +1036,9 @@ server <- function(input, output) {
       if(input$survivalSpaceSelEnable && input$survivalMetric != "agesexcomorbadj" && input[[paste0("survivalSpace", com, "SelEnable")]]) input[[paste0("survivalSpace", com, "Sel")]] else NA),
     pciSel = if(input$survivalSpaceSelEnable && input$survivalSpacePciSelEnable) input$survivalSpacePciSel else NULL,
     countySel = NULL,
-    uom = "%",
-    titleText = "kimenet aránya"))
+    uom = if(input$survivalMetric %in% c("agesexadj", "agesexcomorbadj") && input$survivalMetricDisplay == "OR") "" else "%",
+    titleText = "kimenet aránya",
+    metricDisplay = input$survivalMetricDisplay))
   
   dataInputSurvival <- reactive(switch(input$survivalSubject,
                                        "time" = dataInputTimeSurvival(),
@@ -1000,23 +1057,36 @@ server <- function(input, output) {
                     strat != "None") dat[[strat]] else dat$varname
     
     ownplot(
-      dat, input$survivalSubject, input$survivalTimeIncludeZero, input$survivalTimeCI,
-      input$survivalTimeFreq, input$survivalSpacePlotType,
-      input$survivalSpacePlotBarOrder, input$survivalSpacePlotBarHorizontal,
-      input$survivalSpaceCI && input$survivalMetric != "absolute",
-      "Arány [%]", "%", 1,
-      switch(input$survivalSubject, "time" = input$survivalTimeDisplayallvalues, "space" = input$survivalSpaceDisplayallvalues),
-      input$survivalSpaceFixedcoloraxis, input$survivalSpaceFixedcoloraxisMin, input$survivalSpaceFixedcoloraxisMax, di$title)
+      dat = dat,
+      type = input$survivalSubject,
+      timeIncludeZero = input$survivalTimeIncludeZero,
+      timeCI = input$survivalTimeCI,
+      freq = input$survivalTimeFreq,
+      spacePlotType = input$survivalSpacePlotType,
+      spacePlotBarOrder = input$survivalSpacePlotBarOrder,
+      spacePlotBarHorizontal = input$survivalSpacePlotBarHorizontal,
+      spaceCI = input$survivalSpaceCI && input$survivalMetric != "absolute",
+      ytitle = if(input$survivalMetric %in% c("agesexadj", "agesexcomorbadj") && input$survivalMetricDisplay == "OR") "Esélyhányados (OR)" else "Arány [%]",
+      uom = if(input$survivalMetric %in% c("agesexadj", "agesexcomorbadj") && input$survivalMetricDisplay == "OR") "" else "%",
+      dig = 1,
+      displayallvalues = switch(input$survivalSubject, "time" = input$survivalTimeDisplayallvalues, "space" = input$survivalSpaceDisplayallvalues),
+      fixedcoloraxis = input$survivalSpaceFixedcoloraxis,
+      fixedcoloraxisMin = input$survivalSpaceFixedcoloraxisMin,
+      fixedcoloraxisMax = input$survivalSpaceFixedcoloraxisMax,
+      titleText = di$title)
   })
   
   output$survivalTab <- DT::renderDT(
     server = FALSE,
     {
-      owntab(dataInputSurvival()$data, "Túlélési mutató", paste0("Arány ", switch(
-        input$survivalMetric, "crude" = "(nyers)",
-        "agesexadj" = "(életkorra és nemre korrigált)",
-        "agesexcomorbadj" = "(életkorra, nemre és társbetegségekre korrigált)"), " [%]"),
-        "Halálozási arány, NSZR")
+      owntab(dataInputSurvival()$data, "Túlélési mutató",
+             paste0(if(input$survivalMetric %in% c("agesexadj", "agesexcomorbadj") && input$survivalMetricDisplay == "OR") "Esélyhányados " else "Arány ",
+                    switch(
+                      input$survivalMetric, "crude" = "(nyers)",
+                      "agesexadj" = "(életkorra és nemre korrigált)",
+                      "agesexcomorbadj" = "(életkorra, nemre és társbetegségekre korrigált)"),
+                    if(input$survivalMetric %in% c("agesexadj", "agesexcomorbadj") && input$survivalMetricDisplay == "OR") "" else " [%]"),
+             "Halálozási arány, NSZR")
     })
 }
 
