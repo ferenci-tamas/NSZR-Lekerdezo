@@ -183,7 +183,7 @@ pillanatban négy különböző aspektusból vizsgálathatóak az NSZR adatai.
   csak az idősebb – és emiatt nagyobb szívinfarktus-kockázatú – lakosok
   miatt van. Ez egy példa arra az általános jelenségre, amit magyarban
   is gyakran használt angol szóval
-  [confounding-nak](https://tamas-ferenci.github.io/FerenciTamas_AzOrvosiMegismeresModszertanaEsAzOrvosiKutatasokKritikusErtekelese/)
+  [confounding-nak](https://ferenci-tamas.github.io/orvosi-megismeres-modszertan/)
   szoktak nevezni. A standardizált ráta használata ezt szűri ki; fontos
   hangsúlyozni, hogy csak az életkor vonatkozásában. (Elvileg az is
   felvethető, hogy ha valamelyik megyében vagy valamelyik időpontban
@@ -262,7 +262,7 @@ csomag segíti.
 
 A transzparencia és a nyílt tudomány jegyében ennek teljes forráskódja
 elérhető a következő linken:
-[app.R](https://github.com/tamas-ferenci/NSZR-Lekerdezo/blob/main/app.R).
+[app.R](https://github.com/ferenci-tamas/NSZR-Lekerdezo/blob/main/app.R).
 Ennek tartalma kettős: egyrészt benne van magának a weboldalnak a
 forráskódja (ideértve a felületet, az eredmények előállítását és
 megjelenítését), másrészt benne van a háttérben lévő statisztikai
@@ -275,4 +275,4 @@ továbbfejlesztések születhessenek hozzá.
 
 ------------------------------------------------------------------------
 
-Írta: Ferenci Tamás. E leírás utoljára frissítve: 2024. október 2.
+Írta: Ferenci Tamás. E leírás utoljára frissítve: 2025. augusztus 29.
