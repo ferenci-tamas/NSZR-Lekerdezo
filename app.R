@@ -740,8 +740,7 @@ server <- function(input, output) {
                   align = "left", verticalAlign = "bottom") |>
       hc_credits(enabled = TRUE) |>
       hc_add_theme(hc_theme(chart = list(backgroundColor = "white"))) |>
-      hc_exporting(enabled = TRUE, chartOptions = list(legend = TRUE),
-                   sourceWidth = 1600/2, sourceHeight = 900/2,
+      hc_exporting(enabled = TRUE, sourceWidth = 1600/2, sourceHeight = 900/2,
                    pdfFont = list(
                      normal = "https://nszr.gokvi.hu/_upload/fonts/NotoSans-Regular.ttf",
                      bold = "https://nszr.gokvi.hu/_upload/fonts/NotoSans-Bold.ttf",
